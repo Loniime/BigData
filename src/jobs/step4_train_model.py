@@ -42,11 +42,15 @@ def train_and_evaluate(X: pd.DataFrame, y: pd.Series, meta: pd.DataFrame) -> Dic
 
     # Baseline: prédire la moyenne du train
     baseline_pred = np.full_like(y_test.to_numpy(), fill_value=float(y_train.mean()), dtype=float)
+    baseline_mse = mean_squared_error(y_test, baseline_pred)
+    baseline_rmse = np.sqrt(baseline_mse)
+
     baseline_metrics = {
         "r2": float(r2_score(y_test, baseline_pred)),
-        "mse": float(mean_squared_error(y_test, baseline_pred)),
+        "rmse": float(baseline_rmse),
         "mae": float(mean_absolute_error(y_test, baseline_pred)),
     }
+
 
     # Modèle
     n_estimators = int(os.getenv("RF_N_ESTIMATORS", getattr(Settings, "N_ESTIMATORS", 200)))
@@ -65,10 +69,15 @@ def train_and_evaluate(X: pd.DataFrame, y: pd.Series, meta: pd.DataFrame) -> Dic
     model.fit(X_train, y_train)
 
     pred = model.predict(X_test)
+
+    mse = mean_squared_error(y_test, pred)
+    rmse = float(np.sqrt(mse))
+
     metrics = {
         "r2": float(r2_score(y_test, pred)),
-        "mse": float(mean_squared_error(y_test, pred)),
+        "rmse": rmse,
         "mae": float(mean_absolute_error(y_test, pred)),
+        "mse": float(mse),  # optionnel mais utile
     }
 
     return {
@@ -145,11 +154,11 @@ def main() -> None:
 
         # Metrics
         mlflow.log_metric("r2", float(out["metrics"]["r2"]))
-        mlflow.log_metric("mse", float(out["metrics"]["mse"]))
+        mlflow.log_metric("rmse", out["metrics"]["rmse"])
         mlflow.log_metric("mae", float(out["metrics"]["mae"]))
 
         mlflow.log_metric("baseline_r2", float(out["baseline_metrics"]["r2"]))
-        mlflow.log_metric("baseline_mse", float(out["baseline_metrics"]["mse"]))
+        mlflow.log_metric("baseline_rmse", out["baseline_metrics"]["rmse"])
         mlflow.log_metric("baseline_mae", float(out["baseline_metrics"]["mae"]))
 
         # Tags utiles

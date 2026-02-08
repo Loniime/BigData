@@ -187,7 +187,9 @@ def main() -> None:
 
         r2 = float(r2_score(merged["y_true"], merged["y_pred"]))
         mse = float(mean_squared_error(merged["y_true"], merged["y_pred"]))
+        rmse = float(np.sqrt(mse))
         mae = float(mean_absolute_error(merged["y_true"], merged["y_pred"]))
+
 
         recent_r2 = (
             [h["metrics"]["r2"] for h in history[-(ROLLING_EVAL_WINDOW - 1):]]
@@ -202,7 +204,7 @@ def main() -> None:
                 "n_repos": int(len(merged)),
                 "train_rows": int(last_train_rows),
                 "model_last_train_date": last_train_date.strftime("%Y-%m-%d") if last_train_date else None,
-                "metrics": {"r2": r2, "mse": mse, "mae": mae},
+                "metrics": {"r2": r2, "rmse": rmse, "mae": mae},
                 "rolling_r2_mean_before": rolling_r2_mean_before,
                 "retrained_today": retrained_flag,
                 "triggered_retrain": bool(retrain_reason and retrain_reason.startswith("rolling_r2_")),
@@ -242,6 +244,7 @@ def main() -> None:
 
         r2_vals = [h["metrics"]["r2"] for h in history]
         mae_vals = [h["metrics"]["mae"] for h in history]
+        rmse_vals = [h["metrics"].get("rmse") for h in history if h["metrics"].get("rmse") is not None]
 
         if r2_vals:
             mlflow.log_metric("r2_mean", float(np.mean(r2_vals)))
@@ -251,6 +254,11 @@ def main() -> None:
         if mae_vals:
             mlflow.log_metric("mae_mean", float(np.mean(mae_vals)))
             mlflow.log_metric("mae_max", float(np.max(mae_vals)))
+        if rmse_vals:
+            mlflow.log_metric("rmse_mean", float(np.mean(rmse_vals)))
+            mlflow.log_metric("rmse_max", float(np.max(rmse_vals)))
+            mlflow.log_metric("rmse_last", float(rmse_vals[-1]))
+
 
         n_trigger = sum(1 for h in history if h.get("triggered_retrain"))
         mlflow.log_metric("n_points", len(history))

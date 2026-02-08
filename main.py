@@ -242,18 +242,22 @@ st.markdown("""
         line-height: 1.6;
     }
     .stButton > button {
-        background: white !important;
-        color: #667eea !important;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        color: white !important;
         border: none !important;
         font-weight: bold !important;
         padding: 0.75rem 2rem !important;
         border-radius: 25px !important;
         transition: all 0.3s !important;
+        box-shadow: 0 8px 16px rgba(102, 126, 234, 0.25) !important;
     }
+
     .stButton > button:hover {
         transform: scale(1.05) !important;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+        box-shadow: 0 10px 22px rgba(102, 126, 234, 0.35) !important;
+        filter: brightness(1.05) !important;
     }
+
     .explain-box {
         background: #f0f4ff;
         border-left: 4px solid #667eea;
@@ -414,7 +418,7 @@ to measure prediction accuracy and detect when retraining is needed.
             history["t"] = pd.to_datetime(history["t"])
             history["r2"] = history["metrics"].apply(lambda x: x.get("r2"))
             history["mae"] = history["metrics"].apply(lambda x: x.get("mae"))
-            history["mse"] = history["metrics"].apply(lambda x: x.get("mse"))
+            history["rmse"] = history["metrics"].apply(lambda x: x.get("rmse"))
             
             # Identifier les points de retraining
             retrains = history[history["retrained_today"] == True].copy()
@@ -506,6 +510,45 @@ to measure prediction accuracy and detect when retraining is needed.
             )
             
             st.plotly_chart(fig_mae, use_container_width=True)
+        # Graphique RMSE
+            fig_rmse = go.Figure()
+
+            fig_rmse.add_trace(go.Scatter(
+                x=history["t"],
+                y=history["rmse"],
+                mode='lines+markers',
+                name='RMSE (Root Mean Squared Error)',
+                line=dict(color='#f59e0b', width=2),
+                marker=dict(size=6),
+                fill='tozeroy',
+                fillcolor='rgba(245, 158, 11, 0.1)'
+            ))
+
+            # Points de retraining
+            if len(retrains) > 0:
+                fig_rmse.add_trace(go.Scatter(
+                    x=retrains["t"],
+                    y=retrains["rmse"],
+                    mode='markers',
+                    name='Model Retrained',
+                    marker=dict(
+                        size=12,
+                        color='#10b981',
+                        symbol='star',
+                        line=dict(color='white', width=2)
+                    )
+                ))
+
+            fig_rmse.update_layout(
+                title="Prediction Error Over Time (RMSE)",
+                xaxis_title="Date",
+                yaxis_title="RMSE (stars)",
+                hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+
+            st.plotly_chart(fig_rmse, use_container_width=True)
+
         else:
             st.info("No backtest data available yet. The backtest evaluates model performance over time. Run the backtest job to generate this data.")
         
@@ -530,21 +573,26 @@ to measure prediction accuracy and detect when retraining is needed.
         # Current model status
         meta = storage.download_json(Settings.META_BLOB)
         
-        col_status1, col_status2, col_status3 = st.columns(3)
-        
+        col_status1, col_status2, col_status3, col_status4 = st.columns(4)
+
         if meta:
             with col_status1:
-                st.metric("Current Model R²", f"{meta['metrics']['r2']:.3f}")
+                st.metric("Current Model R²", f"{meta['metrics'].get('r2', 0):.3f}")
             with col_status2:
-                st.metric("Current Model MAE", format_number(meta['metrics']['mae']))
+                st.metric("Current Model MAE", format_number(meta['metrics'].get('mae', 0)))
             with col_status3:
+                st.metric("Current Model RMSE", format_number(meta['metrics'].get('rmse', 0)))
+            with col_status4:
                 st.caption(f"Last trained: {meta.get('created_at', 'N/A')[:16]}")
+
         else:
             with col_status1:
                 st.info("No model trained yet")
             with col_status2:
                 st.write("")
             with col_status3:
+                st.write("")
+            with col_status4:
                 st.write("")
         
         st.markdown("")
@@ -572,9 +620,10 @@ to measure prediction accuracy and detect when retraining is needed.
                         if new_meta:
                             st.markdown("**New Model Performance:**")
                             m1, m2, m3 = st.columns(3)
-                            m1.metric("R²", f"{new_meta['metrics']['r2']:.3f}")
-                            m2.metric("MAE", format_number(new_meta['metrics']['mae']))
-                            m3.metric("MSE", format_number(new_meta['metrics']['mse']))
+                            m1.metric("R²", f"{new_meta['metrics'].get('r2', 0):.3f}")
+                            m2.metric("MAE", format_number(new_meta["metrics"].get("mae", 0)))
+
+                            m3.metric("RMSE", format_number(new_meta["metrics"].get("rmse", 0)))
                             
                             st.info("Model saved to Azure Blob Storage and logged to MLflow")
                     else:
@@ -607,13 +656,11 @@ to measure prediction accuracy and detect when retraining is needed.
         if not model_meta:
             st.warning("Please train a model first before generating predictions.")
         else:
-            col_pred1, col_pred2, col_pred3 = st.columns(3)
+            col_pred1, col_pred2 = st.columns(2)
             
             with col_pred1:
-                st.metric("Model Ready", "Yes")
-            with col_pred2:
                 st.metric("Prediction Horizon", f"{model_meta.get('horizon_days', 7)} days")
-            with col_pred3:
+            with col_pred2:
                 st.metric("Model R²", f"{model_meta['metrics']['r2']:.3f}")
             
             st.markdown("")
@@ -791,7 +838,7 @@ in the next 7 days, reaching approximately **175,099 stars** total.
                     "start_time": ms_to_dt(info.start_time),
                 }
                 
-                for k in ["r2", "mae", "mse"]:
+                for k in ["r2", "mae", "rmse"]:
                     if k in data.metrics:
                         row[k] = data.metrics.get(k)
                 
