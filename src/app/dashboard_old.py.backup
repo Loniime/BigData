@@ -1,0 +1,591 @@
+"""
+🎯 DASHBOARD STREAMLIT - GitHub Stars Predictor
+Visualisation des données collectées depuis Azure Blob Storage
+"""
+
+import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+
+# Import des fonctions utilitaires
+from src.core.azure_storage import AzureStorage
+from src.core.settings import Settings
+from src.core.data_build import snapshots_to_dataframe
+
+def load_all_snapshots() -> list[dict]:
+    storage = AzureStorage()
+    blob_names = storage.list_blobs(Settings.SNAPSHOT_PREFIX)
+    snapshots = []
+    for name in blob_names:
+        snap = storage.download_json(name)
+        if snap and "repos" in snap:
+            snapshots.append(snap)
+    return snapshots
+
+def calculate_growth_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Stats par repo sur la période (initial, current, croissance, daily growth, category).
+    """
+    df = df.sort_values(["repo_id", "date"]).copy()
+    first = df.groupby("repo_id").first().reset_index()
+    last = df.groupby("repo_id").last().reset_index()
+
+    stats = first[["repo_id", "full_name", "language", "stars"]].rename(columns={"stars": "initial_stars"})
+    stats = stats.merge(
+        last[["repo_id", "stars"]].rename(columns={"stars": "current_stars"}),
+        on="repo_id",
+        how="inner"
+    )
+
+    # jours observés par repo
+    n_days = df.groupby("repo_id")["date"].nunique().reset_index().rename(columns={"date": "n_days"})
+    stats = stats.merge(n_days, on="repo_id", how="left")
+
+    stats["stars_growth"] = stats["current_stars"] - stats["initial_stars"]
+    stats["daily_growth"] = stats["stars_growth"] / stats["n_days"].clip(lower=1)
+    stats["stars_growth_pct"] = (stats["stars_growth"] / (stats["initial_stars"] + 1)) * 100
+
+    # Catégories simples (tu peux ajuster)
+    # explosion = top 10% en daily_growth, faible = milieu, stable = bas
+    q90 = stats["daily_growth"].quantile(0.90)
+    q50 = stats["daily_growth"].quantile(0.50)
+
+    def cat(x):
+        if x >= q90:
+            return "🔥 EXPLOSION"
+        if x >= q50:
+            return "📈 CROISSANCE"
+        return "🧊 STABLE"
+
+    stats["category"] = stats["daily_growth"].apply(cat)
+    return stats
+
+def get_repo_timeline(df: pd.DataFrame, full_name: str) -> pd.DataFrame:
+    return df[df["full_name"] == full_name].sort_values("date")
+
+# =============================================================================
+# CONFIGURATION DE LA PAGE
+# =============================================================================
+
+st.set_page_config(
+    page_title="GitHub Stars Predictor",
+    page_icon="⭐",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# CSS personnalisé
+st.markdown("""
+    <style>
+    .main {
+        padding: 0rem 1rem;
+    }
+    .stMetric {
+        background-color: #f0f2f6;
+        padding: 15px;
+        border-radius: 10px;
+    }
+    h1 {
+        color: #1f77b4;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# =============================================================================
+# CHARGEMENT DES DONNÉES (avec cache)
+# =============================================================================
+
+@st.cache_data(ttl=600)  # Cache pendant 10 minutes
+@st.cache_data(ttl=600)
+def load_data():
+    """Charge toutes les données depuis Azure"""
+    try:
+        with st.spinner("Chargement des données depuis Azure..."):
+            snapshots = load_all_snapshots()
+
+        if not snapshots:
+            st.error("Aucun snapshot trouvé sur Azure")
+            return None, None
+
+        df = snapshots_to_dataframe(snapshots)
+        stats_df = calculate_growth_stats(df)
+        return df, stats_df
+
+    except Exception as e:
+        st.error(f"Erreur chargement données: {e}")
+        return None, None
+
+
+# =============================================================================
+# HEADER
+# =============================================================================
+
+st.title("⭐ GitHub Stars Predictor Dashboard")
+st.markdown("---")
+
+# Charger les données
+df, stats_df = load_data()
+
+if df is None or stats_df is None:
+    st.stop()
+
+# =============================================================================
+# SIDEBAR - FILTRES
+# =============================================================================
+
+st.sidebar.header("🎛️ Filtres")
+
+# Sélection de page
+page = st.sidebar.radio(
+    "Navigation",
+    ["📊 Vue d'ensemble", "📈 Évolution temporelle", "🔍 Analyse détaillée", "🏆 Classements", "🧪 Backtest MLOps"]
+)
+
+
+st.sidebar.markdown("---")
+
+# Informations générales
+st.sidebar.markdown("### ℹ️ Informations")
+st.sidebar.info(f"""
+**Période de collecte:**  
+Du {df['date'].min().strftime('%d/%m/%Y')}  
+au {df['date'].max().strftime('%d/%m/%Y')}
+
+**Nombre de jours:** {(df['date'].max() - df['date'].min()).days + 1}  
+**Repos suivis:** {df['repo_id'].nunique()}  
+**Snapshots:** {df['date'].nunique()}
+""")
+
+# =============================================================================
+# PAGE 1 : VUE D'ENSEMBLE
+# =============================================================================
+
+if page == "📊 Vue d'ensemble":
+    st.header("📊 Vue d'ensemble générale")
+    
+    # Métriques principales
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            "Repos suivis",
+            f"{stats_df['repo_id'].nunique():,}",
+            delta=None
+        )
+    
+    with col2:
+        total_stars = stats_df['current_stars'].sum()
+        st.metric(
+            "Total Stars",
+            f"{total_stars:,}",
+            delta=None
+        )
+    
+    with col3:
+        avg_growth = stats_df['daily_growth'].mean()
+        st.metric(
+            "Croissance moy/jour",
+            f"{avg_growth:.1f}",
+            delta=None
+        )
+    
+    with col4:
+        explosion_count = len(stats_df[stats_df['category'] == '🔥 EXPLOSION'])
+        st.metric(
+            "Repos en explosion",
+            f"{explosion_count}",
+            delta=None
+        )
+    
+    st.markdown("---")
+    
+    # Distribution des catégories
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.subheader("🏷️ Distribution des catégories")
+        
+        category_counts = stats_df['category'].value_counts()
+        
+        fig_pie = px.pie(
+            values=category_counts.values,
+            names=category_counts.index,
+            title="Répartition des repos par catégorie",
+            hole=0.4,
+            color_discrete_sequence=['#ff4444', '#ffa500', '#44ff44']
+        )
+        st.plotly_chart(fig_pie, use_container_width=True)
+    
+    with col2:
+        st.subheader("📊 Croissance par catégorie")
+        
+        category_stats = stats_df.groupby('category').agg({
+            'daily_growth': 'mean',
+            'stars_growth_pct': 'mean',
+            'repo_id': 'count'
+        }).reset_index()
+        category_stats.columns = ['Catégorie', 'Croissance/jour', 'Croissance %', 'Nombre']
+        
+        fig_bar = px.bar(
+            category_stats,
+            x='Catégorie',
+            y='Croissance/jour',
+            text='Croissance/jour',
+            title="Croissance moyenne par catégorie (stars/jour)",
+            color='Catégorie',
+            color_discrete_sequence=['#ff4444', '#ffa500', '#44ff44']
+        )
+        fig_bar.update_traces(texttemplate='%{text:.1f}', textposition='outside')
+        st.plotly_chart(fig_bar, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Langages les plus populaires
+    st.subheader("💻 Langages les plus représentés")
+    
+    lang_stats = stats_df.groupby('language').agg({
+        'repo_id': 'count',
+        'current_stars': 'sum',
+        'daily_growth': 'mean'
+    }).reset_index()
+    lang_stats.columns = ['Langage', 'Nombre de repos', 'Total stars', 'Croissance moy/jour']
+    lang_stats = lang_stats.sort_values('Nombre de repos', ascending=False).head(10)
+    
+    fig_lang = px.bar(
+        lang_stats,
+        x='Langage',
+        y='Nombre de repos',
+        text='Nombre de repos',
+        title="Top 10 langages",
+        color='Croissance moy/jour',
+        color_continuous_scale='viridis'
+    )
+    st.plotly_chart(fig_lang, use_container_width=True)
+
+# =============================================================================
+# PAGE 2 : ÉVOLUTION TEMPORELLE
+# =============================================================================
+
+elif page == "📈 Évolution temporelle":
+    st.header("📈 Évolution temporelle des métriques")
+    
+    # Sélection de repos à afficher
+    st.sidebar.markdown("### Filtres temporels")
+    
+    # Top N repos
+    top_n = st.sidebar.slider("Afficher top N repos", 5, 50, 10)
+    
+    # Métrique à afficher
+    metric = st.sidebar.selectbox(
+        "Métrique à visualiser",
+        ["Stars", "Forks", "Issues ouvertes"]
+    )
+    
+    metric_col = {
+        "Stars": "stars",
+        "Forks": "forks",
+        "Issues ouvertes": "open_issues"
+    }[metric]
+    
+    # Sélectionner les top repos par croissance
+    top_repos = stats_df.nlargest(top_n, 'daily_growth')['full_name'].tolist()
+    
+    # Filtrer les données
+    df_filtered = df[df['full_name'].isin(top_repos)]
+    
+    # Graphique d'évolution
+    st.subheader(f"📊 Évolution de {metric} - Top {top_n} repos en croissance")
+    
+    fig = px.line(
+        df_filtered,
+        x='date',
+        y=metric_col,
+        color='full_name',
+        title=f"Évolution de {metric} au fil du temps",
+        labels={'date': 'Date', metric_col: metric},
+        markers=True
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=1,
+            xanchor="left",
+            x=1.02
+        )
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Heatmap des collectes
+    st.subheader("🗓️ Calendrier des collectes")
+    
+    # Compter les repos collectés par date
+    daily_counts = df.groupby('date')['repo_id'].count().reset_index()
+    daily_counts.columns = ['date', 'count']
+    daily_counts['day'] = daily_counts['date'].dt.day
+    daily_counts['month'] = daily_counts['date'].dt.month
+    daily_counts['year'] = daily_counts['date'].dt.year
+    
+    fig_heatmap = px.density_heatmap(
+        daily_counts,
+        x='day',
+        y='month',
+        z='count',
+        title="Nombre de repos collectés par jour",
+        labels={'day': 'Jour du mois', 'month': 'Mois', 'count': 'Nombre de repos'},
+        color_continuous_scale='Blues'
+    )
+    
+    st.plotly_chart(fig_heatmap, use_container_width=True)
+
+# =============================================================================
+# PAGE 3 : ANALYSE DÉTAILLÉE
+# =============================================================================
+
+elif page == "🔍 Analyse détaillée":
+    st.header("🔍 Analyse détaillée par repo")
+    
+    # Sélectionner un repo
+    repo_names = sorted(df['full_name'].unique())
+    selected_repo = st.selectbox("Sélectionner un repo", repo_names)
+    
+    if selected_repo:
+        # Données du repo
+        repo_timeline = get_repo_timeline(df, selected_repo)
+        repo_stats = stats_df[stats_df['full_name'] == selected_repo].iloc[0]
+        
+        # Informations générales
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Catégorie", repo_stats['category'])
+        
+        with col2:
+            st.metric(
+                "Stars actuelles",
+                f"{repo_stats['current_stars']:,}",
+                delta=f"+{repo_stats['stars_growth']:,}"
+            )
+        
+        with col3:
+            st.metric(
+                "Croissance/jour",
+                f"{repo_stats['daily_growth']:.2f}",
+                delta=f"{repo_stats['stars_growth_pct']:.1f}%"
+            )
+        
+        st.markdown("---")
+        
+        # Graphiques d'évolution
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Évolution des stars
+            fig_stars = go.Figure()
+            
+            fig_stars.add_trace(go.Scatter(
+                x=repo_timeline['date'],
+                y=repo_timeline['stars'],
+                mode='lines+markers',
+                name='Stars',
+                line=dict(color='gold', width=3),
+                marker=dict(size=8)
+            ))
+            
+            fig_stars.update_layout(
+                title="Évolution des stars",
+                xaxis_title="Date",
+                yaxis_title="Nombre de stars",
+                hovermode='x'
+            )
+            
+            st.plotly_chart(fig_stars, use_container_width=True)
+        
+        with col2:
+            # Évolution des forks
+            fig_forks = go.Figure()
+            
+            fig_forks.add_trace(go.Scatter(
+                x=repo_timeline['date'],
+                y=repo_timeline['forks'],
+                mode='lines+markers',
+                name='Forks',
+                line=dict(color='blue', width=3),
+                marker=dict(size=8)
+            ))
+            
+            fig_forks.update_layout(
+                title="Évolution des forks",
+                xaxis_title="Date",
+                yaxis_title="Nombre de forks",
+                hovermode='x'
+            )
+            
+            st.plotly_chart(fig_forks, use_container_width=True)
+        
+        # Croissance quotidienne
+        st.subheader("📊 Croissance quotidienne")
+        
+        # Calculer la croissance jour par jour
+        repo_timeline = repo_timeline.sort_values('date')
+        repo_timeline['daily_change'] = repo_timeline['stars'].diff()
+        
+        fig_daily = px.bar(
+            repo_timeline[1:],  # Ignorer le premier jour (pas de diff)
+            x='date',
+            y='daily_change',
+            title="Changement quotidien (stars gagnées/perdues)",
+            labels={'date': 'Date', 'daily_change': 'Stars gagnées'},
+            color='daily_change',
+            color_continuous_scale=['red', 'yellow', 'green']
+        )
+        
+        st.plotly_chart(fig_daily, use_container_width=True)
+        
+        # Tableau de données
+        st.subheader("📋 Données brutes")
+        st.dataframe(
+            repo_timeline[['date', 'stars', 'forks', 'open_issues', 'watchers']].sort_values('date', ascending=False),
+            use_container_width=True
+        )
+
+# =============================================================================
+# PAGE 4 : CLASSEMENTS
+# =============================================================================
+
+elif page == "🏆 Classements":
+    st.header("🏆 Classements et Top performers")
+    
+    # Filtres
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        category_filter = st.multiselect(
+            "Filtrer par catégorie",
+            stats_df['category'].unique(),
+            default=stats_df['category'].unique()
+        )
+    
+    with col2:
+        language_filter = st.multiselect(
+            "Filtrer par langage",
+            stats_df['language'].unique(),
+            default=None
+        )
+    
+    # Appliquer filtres
+    filtered_stats = stats_df.copy()
+    
+    if category_filter:
+        filtered_stats = filtered_stats[filtered_stats['category'].isin(category_filter)]
+    
+    if language_filter:
+        filtered_stats = filtered_stats[filtered_stats['language'].isin(language_filter)]
+    
+    # Top repos par croissance absolue
+    st.subheader("🔥 Top 20 - Plus forte croissance (nombre de stars)")
+    
+    top_growth = filtered_stats.nlargest(20, 'stars_growth')[
+        ['full_name', 'category', 'language', 'initial_stars', 'current_stars', 'stars_growth', 'daily_growth']
+    ]
+    
+    st.dataframe(
+        top_growth.style.background_gradient(subset=['stars_growth'], cmap='Reds'),
+        use_container_width=True
+    )
+    
+    st.markdown("---")
+    
+    # Top repos par croissance relative
+    st.subheader("📈 Top 20 - Plus forte croissance (pourcentage)")
+    
+    top_growth_pct = filtered_stats.nlargest(20, 'stars_growth_pct')[
+        ['full_name', 'category', 'language', 'initial_stars', 'current_stars', 'stars_growth_pct', 'daily_growth']
+    ]
+    
+    st.dataframe(
+        top_growth_pct.style.background_gradient(subset=['stars_growth_pct'], cmap='Greens'),
+        use_container_width=True
+    )
+    
+    st.markdown("---")
+    
+    # Comparaison graphique
+    st.subheader("📊 Comparaison des top performers")
+    
+    top_10 = filtered_stats.nlargest(10, 'daily_growth')
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Bar(
+        name='Croissance/jour',
+        x=top_10['full_name'],
+        y=top_10['daily_growth'],
+        marker_color='lightblue'
+    ))
+    
+    fig.update_layout(
+        title="Top 10 repos - Croissance quotidienne",
+        xaxis_title="Repo",
+        yaxis_title="Stars/jour",
+        xaxis_tickangle=-45,
+        height=500
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+elif page == "🧪 Backtest MLOps":
+    st.header("🧪 Backtest MLOps — Monitoring dans le temps")
+
+    storage = AzureStorage()
+    backtest_blob = "monitoring/metrics_history_backtest.json"
+    bt = storage.download_json(backtest_blob)
+
+    if not bt or "history" not in bt or len(bt["history"]) == 0:
+        st.warning("Aucun historique de backtest trouvé. Lance le job backtest d’abord.")
+        st.stop()
+
+    hist = pd.DataFrame(bt["history"])
+    hist["t"] = pd.to_datetime(hist["t"])
+    hist["r2"] = hist["metrics"].apply(lambda x: x.get("r2"))
+    hist["mae"] = hist["metrics"].apply(lambda x: x.get("mae"))
+    hist["mse"] = hist["metrics"].apply(lambda x: x.get("mse"))
+
+    st.subheader("📉 R² dans le temps")
+    fig = px.line(hist, x="t", y="r2", markers=True, title="R² au fil du temps (backtest)")
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("📏 MAE dans le temps")
+    fig2 = px.line(hist, x="t", y="mae", markers=True, title="MAE au fil du temps (backtest)")
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # Afficher les retrains
+    st.subheader("🔁 Dates de retrain")
+    retrains = hist[hist.get("retrained_today", False) == True].copy()
+    if len(retrains) == 0:
+        st.info("Aucun retrain enregistré.")
+    else:
+        st.dataframe(
+            retrains[["t", "r2", "mae", "triggered_retrain", "trigger_reason", "train_rows"]],
+            use_container_width=True
+        )
+
+
+# =============================================================================
+# FOOTER
+# =============================================================================
+
+st.markdown("---")
+st.markdown("""
+    <div style='text-align: center; color: #888;'>
+        <p>📊 GitHub Stars Predictor Dashboard v1.0</p>
+        <p>Données stockées sur Azure Blob Storage</p>
+    </div>
+""", unsafe_allow_html=True)

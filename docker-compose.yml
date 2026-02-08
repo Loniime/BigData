@@ -1,0 +1,77 @@
+services:
+  mlflow:
+    profiles: ["local"]
+    image: python:3.11-slim
+    container_name: mlflow_server
+    working_dir: /app
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns:/app/mlruns
+    environment:
+      - MLFLOW_TRACKING_ALLOW_INSECURE_HTTP=1
+    command: >
+      bash -lc "pip install -q mlflow &&
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:////app/mlruns/mlflow.db
+      --default-artifact-root /app/mlruns
+      --serve-artifacts
+      --allowed-hosts '*'"
+
+  dashboard:
+    build: .
+    container_name: github_mlops_dashboard
+    env_file: [.env]
+    environment:
+      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}
+      - MLFLOW_EXPERIMENT_NAME=${MLFLOW_EXPERIMENT_NAME:-github-stars}
+      - GIT_PYTHON_REFRESH=quiet
+      - CLOUD_PROVIDER=${CLOUD_PROVIDER:-azure}
+      - AZURE_CONNECTION_STRING=${AZURE_CONNECTION_STRING}
+      - AZURE_CONTAINER=${AZURE_CONTAINER:-github-data}
+    ports:
+      - "8501:8501"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  
+      - .:/app  
+    command: >
+      bash -lc "uv run streamlit run src/app/dashboard.py
+      --server.address 0.0.0.0 --server.port 8501"
+
+  train:
+    build: .
+    container_name: github_mlops_train
+    env_file: [.env]
+    environment:
+      - GIT_PYTHON_REFRESH=quiet
+      - CLOUD_PROVIDER=${CLOUD_PROVIDER:-azure}
+      - AZURE_CONNECTION_STRING=${AZURE_CONNECTION_STRING}
+      - AZURE_CONTAINER=${AZURE_CONTAINER:-github-data}
+    command: >
+      bash -lc ". /app/.venv/bin/activate && python -m src.jobs.step4_train_model"
+
+  predict:
+    build: .
+    container_name: github_mlops_predict
+    env_file: [.env]
+    environment:
+      - GIT_PYTHON_REFRESH=quiet
+      - CLOUD_PROVIDER=${CLOUD_PROVIDER:-azure}
+      - AZURE_CONNECTION_STRING=${AZURE_CONNECTION_STRING}
+      - AZURE_CONTAINER=${AZURE_CONTAINER:-github-data}
+    command: >
+      bash -lc ". /app/.venv/bin/activate && python -m src.jobs.step5_predict_monitor"
+
+  backtest:
+    build: .
+    container_name: github_mlops_backtest
+    env_file: [.env]
+    environment:
+      - GIT_PYTHON_REFRESH=quiet
+      - CLOUD_PROVIDER=${CLOUD_PROVIDER:-azure}
+      - AZURE_CONNECTION_STRING=${AZURE_CONNECTION_STRING}
+      - AZURE_CONTAINER=${AZURE_CONTAINER:-github-data}
+    command: >
+      bash -lc ". /app/.venv/bin/activate && python -m src.jobs.step6_backtest"
