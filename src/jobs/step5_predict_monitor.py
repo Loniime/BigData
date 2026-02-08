@@ -11,6 +11,7 @@ from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 import mlflow
 from joblib import dump
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestClassifier
 from src.core.azure_storage import AzureStorage
 from src.core.settings import Settings
 from src.core.mlflow_utils import mlflow_setup
@@ -64,11 +65,16 @@ def retrain_model_and_upload(storage: AzureStorage, df_all: pd.DataFrame) -> Dic
     model.fit(X_train, y_train)
 
     pred = model.predict(X_test)
+    mse = float(mean_squared_error(y_test, pred))
+    rmse = float(np.sqrt(mse))
+
     metrics = {
         "r2": float(r2_score(y_test, pred)),
-        "mse": float(mean_squared_error(y_test, pred)),
+        "mse": mse,
+        "rmse": rmse,
         "mae": float(mean_absolute_error(y_test, pred)),
     }
+
 
     # upload model
     local_path = "stars_delta_7d_model.joblib"
@@ -147,7 +153,32 @@ def main():
     # -------------------------
     # Predict
     # -------------------------
+    # -------------------------
+    # Load classifier (optional)
+    # -------------------------
+    clf_blob = getattr(Settings, "CLASSIFIER_MODEL_BLOB", "models/stars_growth_classifier.joblib")
+    clf_bytes = storage.download_bytes(clf_blob)
+
+    clf = None
+    if clf_bytes:
+        local_clf_path = "stars_growth_classifier.joblib"
+        with open(local_clf_path, "wb") as f:
+            f.write(clf_bytes)
+        clf = load(local_clf_path)
+
     y_pred = model.predict(X_pred)
+
+    pred_class = None
+    pred_proba_explosion = None
+
+    if clf is not None:
+        pred_class = clf.predict(X_pred)
+        if hasattr(clf, "predict_proba"):
+            proba = clf.predict_proba(X_pred)
+            # classe 2 = explosion -> colonne index 2 si classes=[0,1,2]
+            if proba.shape[1] >= 3:
+                pred_proba_explosion = proba[:, 2]
+
 
     pred_blob = f"{Settings.PRED_PREFIX}{last_date_str}.json"
     pred_payload = {
@@ -164,13 +195,20 @@ def main():
                 "stars_t": float(stars_t),
                 "pred_delta_stars_h": float(pred),
                 "pred_stars_t_plus_h": float(stars_t + pred),
+                "pred_class": int(c) if pred_class is not None else None,
+                "pred_proba_explosion": float(p) if pred_proba_explosion is not None else None,
+
             }
-            for rid, fname, stars_t, pred in zip(
+            
+            for rid, fname, stars_t, pred, c, p in zip(
                 meta_pred["repo_id"].to_numpy(),
                 meta_pred.get("full_name", pd.Series([""] * len(meta_pred))).fillna("").to_numpy(),
-                meta_pred["stars"].to_numpy(),
+                meta_pred["stars_t"].to_numpy(),
                 y_pred,
+                pred_class if pred_class is not None else [None] * len(meta_pred),
+                pred_proba_explosion if pred_proba_explosion is not None else [None] * len(meta_pred),
             )
+
         ],
     }
 
@@ -231,14 +269,19 @@ def main():
         y_true = merged["y_true"].astype(float).to_numpy()
         y_hat = merged["pred_delta_stars_h"].astype(float).to_numpy()
 
+        mse = float(mean_squared_error(y_true, y_hat))
+        rmse = float(np.sqrt(mse))
+
         metrics = {
             "pred_as_of_date": date_str,
             "evaluated_at": datetime.utcnow().isoformat() + "Z",
             "n_eval": int(len(merged)),
             "r2": float(r2_score(y_true, y_hat)),
-            "mse": float(mean_squared_error(y_true, y_hat)),
+            "mse": mse,
+            "rmse": rmse,
             "mae": float(mean_absolute_error(y_true, y_hat)),
         }
+
 
         history["history"].append(metrics)
         print(f"Evaluated {date_str}: R2={metrics['r2']:.3f} n={metrics['n_eval']}")

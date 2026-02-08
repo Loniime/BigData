@@ -25,3 +25,8 @@ class Settings:
     N_ESTIMATORS: int = int(os.getenv("RF_N_ESTIMATORS", "300"))
     MAX_DEPTH: int = int(os.getenv("RF_MAX_DEPTH", "20"))
     RANDOM_STATE: int = int(os.getenv("ML_RANDOM_STATE", "42"))
+
+    CLASSIFIER_MODEL_BLOB = "models/stars_growth_classifier.joblib"
+    CLASSIFIER_THRESHOLDS_BLOB = "models/classification_thresholds.json"
+    CLASSIFIER_META_BLOB = "models/classifier_meta.json"
+

@@ -69,6 +69,8 @@ def build_supervised_dataset(
     X = df2[feature_cols].astype(float)
     y = df2["y_delta_stars_h"].astype(float)
     meta = df2[["repo_id", "date", "full_name", "stars", "stars_t_plus_h"]].copy()
+    meta = meta.rename(columns={"stars": "stars_t"})
+
     return X, y, feature_cols, meta
 
 
@@ -108,4 +110,6 @@ def build_features_for_prediction(df: pd.DataFrame, window_days: int, as_of_date
 
     X_pred = df_today[feature_cols].astype(float)
     meta = df_today[["repo_id", "full_name", "date", "stars"]].copy()
+    meta = meta.rename(columns={"stars": "stars_t"})
+
     return X_pred, meta, feature_cols

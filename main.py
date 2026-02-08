@@ -27,11 +27,11 @@ def format_number(num):
     return f"{num:,}"
 
 # =============================================================================
-# FONCTION TRAINING
+# FONCTION TRAINING RÉGRESSION
 # =============================================================================
 
 def run_training(progress_callback=None):
-    """Exécute le training avec les paramètres par défaut"""
+    """Exécute le training régression avec les paramètres par défaut"""
     import sys
     from io import StringIO
     
@@ -61,11 +61,45 @@ def run_training(progress_callback=None):
         sys.stdout = old_stdout
 
 # =============================================================================
+# FONCTION TRAINING CLASSIFICATION
+# =============================================================================
+
+def run_classifier_training(progress_callback=None):
+    """Exécute le training du classifier"""
+    import sys
+    from io import StringIO
+    
+    old_stdout = sys.stdout
+    sys.stdout = captured_output = StringIO()
+    
+    try:
+        from src.jobs.step4b_train_classifier import main as train_clf_main
+        
+        if progress_callback:
+            progress_callback(30, "Loading data...")
+        
+        if progress_callback:
+            progress_callback(60, "Training classifier...")
+        
+        train_clf_main()
+        
+        if progress_callback:
+            progress_callback(100, "Completed!")
+        
+        return True, "Classifier training completed successfully"
+    
+    except Exception as e:
+        return False, str(e)
+    
+    finally:
+        sys.stdout = old_stdout
+
+# =============================================================================
 # FONCTION PREDICTION
 # =============================================================================
 
 def run_prediction(progress_callback=None):
-    """Exécute les prédictions"""
+    """Exécute les prédictions (régression + classification)"""
     import sys
     from io import StringIO
     
@@ -76,7 +110,7 @@ def run_prediction(progress_callback=None):
         from src.jobs.step5_predict_monitor import main as predict_main
         
         if progress_callback:
-            progress_callback(30, "Loading model...")
+            progress_callback(30, "Loading models...")
         
         if progress_callback:
             progress_callback(60, "Generating predictions...")
@@ -100,6 +134,8 @@ def run_prediction(progress_callback=None):
 
 if "train_running" not in st.session_state:
     st.session_state.train_running = False
+if "clf_train_running" not in st.session_state:
+    st.session_state.clf_train_running = False
 if "pred_generated" not in st.session_state:
     st.session_state.pred_generated = False
 if "pred_df" not in st.session_state:
@@ -178,13 +214,6 @@ st.markdown("""
     }
     .metric-value { font-size: 2rem; font-weight: bold; }
     .metric-label { font-size: 0.9rem; opacity: 0.9; }
-    .status-success {
-        background: #10b981;
-        color: white;
-        padding: 0.5rem 1rem;
-        border-radius: 20px;
-        display: inline-block;
-    }
     .main-title {
         text-align: center;
         font-size: 3rem;
@@ -242,22 +271,18 @@ st.markdown("""
         line-height: 1.6;
     }
     .stButton > button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-        color: white !important;
+        background: white !important;
+        color: #667eea !important;
         border: none !important;
         font-weight: bold !important;
         padding: 0.75rem 2rem !important;
         border-radius: 25px !important;
         transition: all 0.3s !important;
-        box-shadow: 0 8px 16px rgba(102, 126, 234, 0.25) !important;
     }
-
     .stButton > button:hover {
         transform: scale(1.05) !important;
-        box-shadow: 0 10px 22px rgba(102, 126, 234, 0.35) !important;
-        filter: brightness(1.05) !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
     }
-
     .explain-box {
         background: #f0f4ff;
         border-left: 4px solid #667eea;
@@ -302,10 +327,6 @@ st.markdown("""
 
 def main():
     
-    # =============================================================================
-    # PAGE: HOME
-    # =============================================================================
-    
     if st.session_state.current_page == "Home":
         # Titre centré
         st.markdown('<h1 class="main-title">GitHub Stars MLOps Platform</h1>', unsafe_allow_html=True)
@@ -314,9 +335,8 @@ def main():
         st.markdown("""
 <div class="intro-text">
 This platform provides an end-to-end machine learning pipeline for predicting GitHub repository growth. 
-Using historical star data, the system trains predictive models to forecast which repositories will gain 
-popularity in the coming days. The platform integrates Azure Blob Storage for data persistence, 
-MLflow for experiment tracking, and provides automated training and prediction capabilities.
+Using historical star data, the system trains both regression and classification models to forecast 
+repository performance and detect potential viral growth patterns.
 </div>
 """, unsafe_allow_html=True)
         
@@ -463,7 +483,7 @@ to measure prediction accuracy and detect when retraining is needed.
             )
             
             fig_r2.update_layout(
-                title="R² Score Evolution (with Auto-Retrain Events)",
+                title="R² Score Evolution (Regression)",
                 xaxis_title="Date",
                 yaxis_title="R² Score",
                 hovermode="x unified",
@@ -510,9 +530,10 @@ to measure prediction accuracy and detect when retraining is needed.
             )
             
             st.plotly_chart(fig_mae, use_container_width=True)
-        # Graphique RMSE
+            
+            # Graphique RMSE
             fig_rmse = go.Figure()
-
+            
             fig_rmse.add_trace(go.Scatter(
                 x=history["t"],
                 y=history["rmse"],
@@ -523,7 +544,7 @@ to measure prediction accuracy and detect when retraining is needed.
                 fill='tozeroy',
                 fillcolor='rgba(245, 158, 11, 0.1)'
             ))
-
+            
             # Points de retraining
             if len(retrains) > 0:
                 fig_rmse.add_trace(go.Scatter(
@@ -538,7 +559,7 @@ to measure prediction accuracy and detect when retraining is needed.
                         line=dict(color='white', width=2)
                     )
                 ))
-
+            
             fig_rmse.update_layout(
                 title="Prediction Error Over Time (RMSE)",
                 xaxis_title="Date",
@@ -546,26 +567,234 @@ to measure prediction accuracy and detect when retraining is needed.
                 hovermode="x unified",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
-
+            
             st.plotly_chart(fig_rmse, use_container_width=True)
-
         else:
-            st.info("No backtest data available yet. The backtest evaluates model performance over time. Run the backtest job to generate this data.")
-        
+            st.info("No backtest data available yet. Run the backtest job to generate monitoring data.")
+        # Ajouter APRÈS le monitoring de régression (ligne ~400 environ)
+
         # =========================================================================
-        # SECTION: TRAINING
+        # SECTION: CLASSIFICATION MODEL PERFORMANCE MONITORING
         # =========================================================================
         
-        st.markdown('<div class="section-title">Train a New Model</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Classification Model Performance Monitoring</div>', unsafe_allow_html=True)
+        st.markdown("""
+<div class="section-desc">
+Track the classification model's ability to correctly identify growth regimes over time. 
+Monitor F1 score, recall for explosion class, and precision to ensure early detection of viral repositories.
+</div>
+""", unsafe_allow_html=True)
+        
+        clf_backtest_data = storage.download_json("monitoring/classifier_metrics_history_backtest.json")
+        
+        if clf_backtest_data and "history" in clf_backtest_data and len(clf_backtest_data["history"]) > 0:
+            clf_history = pd.DataFrame(clf_backtest_data["history"])
+            clf_history["t"] = pd.to_datetime(clf_history["t"])
+            clf_history["accuracy"] = clf_history["metrics"].apply(lambda x: x.get("accuracy"))
+            clf_history["f1_macro"] = clf_history["metrics"].apply(lambda x: x.get("f1_macro"))
+            clf_history["recall_explosion"] = clf_history["metrics"].apply(lambda x: x.get("recall_explosion"))
+            clf_history["precision_explosion"] = clf_history["metrics"].apply(lambda x: x.get("precision_explosion"))
+            
+            # Identifier les points de retraining
+            clf_retrains = clf_history[clf_history["retrained_today"] == True].copy()
+            
+            import plotly.graph_objects as go
+            
+            # Graphique F1 Macro
+            fig_f1 = go.Figure()
+            
+            fig_f1.add_trace(go.Scatter(
+                x=clf_history["t"],
+                y=clf_history["f1_macro"],
+                mode='lines+markers',
+                name='F1 Macro Score',
+                line=dict(color='#667eea', width=2),
+                marker=dict(size=6)
+            ))
+            
+            # Points de retraining
+            if len(clf_retrains) > 0:
+                fig_f1.add_trace(go.Scatter(
+                    x=clf_retrains["t"],
+                    y=clf_retrains["f1_macro"],
+                    mode='markers',
+                    name='Classifier Retrained',
+                    marker=dict(
+                        size=12,
+                        color='#10b981',
+                        symbol='star',
+                        line=dict(color='white', width=2)
+                    )
+                ))
+            
+            # Ligne de seuil F1
+            f1_threshold = clf_backtest_data.get("f1_threshold", 0.40)
+            fig_f1.add_hline(
+                y=f1_threshold, 
+                line_dash="dash", 
+                line_color="red",
+                annotation_text=f"Retrain Threshold ({f1_threshold})"
+            )
+            
+            fig_f1.update_layout(
+                title="F1 Macro Score Evolution (Classification)",
+                xaxis_title="Date",
+                yaxis_title="F1 Macro",
+                hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            
+            st.plotly_chart(fig_f1, use_container_width=True)
+            
+            # Graphique Recall Explosion
+            fig_recall = go.Figure()
+            
+            # Filtrer les valeurs non-null pour recall
+            clf_history_recall = clf_history[clf_history["recall_explosion"].notna()].copy()
+            
+            fig_recall.add_trace(go.Scatter(
+                x=clf_history_recall["t"],
+                y=clf_history_recall["recall_explosion"],
+                mode='lines+markers',
+                name='Recall Explosion Class',
+                line=dict(color='#dc2626', width=2),
+                marker=dict(size=6),
+                fill='tozeroy',
+                fillcolor='rgba(220, 38, 38, 0.1)'
+            ))
+            
+            # Points de retraining
+            if len(clf_retrains) > 0:
+                clf_retrains_recall = clf_retrains[clf_retrains["recall_explosion"].notna()].copy()
+                if len(clf_retrains_recall) > 0:
+                    fig_recall.add_trace(go.Scatter(
+                        x=clf_retrains_recall["t"],
+                        y=clf_retrains_recall["recall_explosion"],
+                        mode='markers',
+                        name='Classifier Retrained',
+                        marker=dict(
+                            size=12,
+                            color='#10b981',
+                            symbol='star',
+                            line=dict(color='white', width=2)
+                        )
+                    ))
+            
+            # Ligne de seuil Recall
+            recall_threshold = clf_backtest_data.get("recall_threshold", 0.30)
+            fig_recall.add_hline(
+                y=recall_threshold, 
+                line_dash="dash", 
+                line_color="red",
+                annotation_text=f"Retrain Threshold ({recall_threshold})"
+            )
+            
+            fig_recall.update_layout(
+                title="Recall for Explosion Class Over Time",
+                xaxis_title="Date",
+                yaxis_title="Recall (Explosion)",
+                hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            
+            st.plotly_chart(fig_recall, use_container_width=True)
+            
+            # Graphique Precision Explosion
+            fig_precision = go.Figure()
+            
+            # Filtrer les valeurs non-null pour precision
+            clf_history_precision = clf_history[clf_history["precision_explosion"].notna()].copy()
+            
+            fig_precision.add_trace(go.Scatter(
+                x=clf_history_precision["t"],
+                y=clf_history_precision["precision_explosion"],
+                mode='lines+markers',
+                name='Precision Explosion Class',
+                line=dict(color='#f59e0b', width=2),
+                marker=dict(size=6),
+                fill='tozeroy',
+                fillcolor='rgba(245, 158, 11, 0.1)'
+            ))
+            
+            # Points de retraining
+            if len(clf_retrains) > 0:
+                clf_retrains_precision = clf_retrains[clf_retrains["precision_explosion"].notna()].copy()
+                if len(clf_retrains_precision) > 0:
+                    fig_precision.add_trace(go.Scatter(
+                        x=clf_retrains_precision["t"],
+                        y=clf_retrains_precision["precision_explosion"],
+                        mode='markers',
+                        name='Classifier Retrained',
+                        marker=dict(
+                            size=12,
+                            color='#10b981',
+                            symbol='star',
+                            line=dict(color='white', width=2)
+                        )
+                    ))
+            
+            fig_precision.update_layout(
+                title="Precision for Explosion Class Over Time",
+                xaxis_title="Date",
+                yaxis_title="Precision (Explosion)",
+                hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            
+            st.plotly_chart(fig_precision, use_container_width=True)
+            
+            # Graphique Accuracy
+            fig_accuracy = go.Figure()
+            
+            fig_accuracy.add_trace(go.Scatter(
+                x=clf_history["t"],
+                y=clf_history["accuracy"],
+                mode='lines+markers',
+                name='Overall Accuracy',
+                line=dict(color='#8b5cf6', width=2),
+                marker=dict(size=6),
+                fill='tozeroy',
+                fillcolor='rgba(139, 92, 246, 0.1)'
+            ))
+            
+            # Points de retraining
+            if len(clf_retrains) > 0:
+                fig_accuracy.add_trace(go.Scatter(
+                    x=clf_retrains["t"],
+                    y=clf_retrains["accuracy"],
+                    mode='markers',
+                    name='Classifier Retrained',
+                    marker=dict(
+                        size=12,
+                        color='#10b981',
+                        symbol='star',
+                        line=dict(color='white', width=2)
+                    )
+                ))
+            
+            fig_accuracy.update_layout(
+                title="Overall Accuracy Over Time",
+                xaxis_title="Date",
+                yaxis_title="Accuracy",
+                hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            
+            st.plotly_chart(fig_accuracy, use_container_width=True)
+        else:
+            st.info("No classifier backtest data available yet. Run the classifier backtest job (step6b_backtest_classifier.py) to generate monitoring data.")
+        # =========================================================================
+        # SECTION: REGRESSION TRAINING
+        # =========================================================================
+        
+        st.markdown('<div class="section-title">Train Regression Model</div>', unsafe_allow_html=True)
         
         st.markdown("""
 <div class="action-box">
-    <div class="action-title">Model Training</div>
+    <div class="action-title">Regression Model Training</div>
     <div class="action-desc">
-    The training process builds a predictive model using the latest data. It automatically splits 
-    the dataset, trains a Random Forest model, evaluates performance, and saves everything to 
-    Azure Blob Storage and MLflow. The model predicts how many stars each repository will gain 
-    in the next 7 days based on historical patterns.
+    The regression model predicts the exact number of stars a repository will gain over the next 7 days. 
+    It uses temporal features and historical patterns to forecast precise numeric growth values.
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -573,26 +802,21 @@ to measure prediction accuracy and detect when retraining is needed.
         # Current model status
         meta = storage.download_json(Settings.META_BLOB)
         
-        col_status1, col_status2, col_status3, col_status4 = st.columns(4)
-
+        col_status1, col_status2, col_status3 = st.columns(3)
+        
         if meta:
             with col_status1:
-                st.metric("Current Model R²", f"{meta['metrics'].get('r2', 0):.3f}")
+                st.metric("Current Model R²", f"{meta['metrics']['r2']:.3f}")
             with col_status2:
-                st.metric("Current Model MAE", format_number(meta['metrics'].get('mae', 0)))
+                st.metric("Current Model MAE", format_number(meta['metrics']['mae']))
             with col_status3:
-                st.metric("Current Model RMSE", format_number(meta['metrics'].get('rmse', 0)))
-            with col_status4:
                 st.caption(f"Last trained: {meta.get('created_at', 'N/A')[:16]}")
-
         else:
             with col_status1:
-                st.info("No model trained yet")
+                st.info("No regression model trained yet")
             with col_status2:
                 st.write("")
             with col_status3:
-                st.write("")
-            with col_status4:
                 st.write("")
         
         st.markdown("")
@@ -600,7 +824,7 @@ to measure prediction accuracy and detect when retraining is needed.
         # Bouton training centré
         col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
         with col_btn2:
-            if st.button("START TRAINING", type="primary", use_container_width=True, disabled=st.session_state.train_running, key="train_main"):
+            if st.button("START REGRESSION TRAINING", type="primary", use_container_width=True, disabled=st.session_state.train_running, key="train_reg"):
                 st.session_state.train_running = True
                 
                 progress_bar = st.progress(0)
@@ -614,18 +838,17 @@ to measure prediction accuracy and detect when retraining is needed.
                     success, message = run_training(progress_callback=update_progress)
                     
                     if success:
-                        st.success("Training completed successfully!")
+                        st.success("Regression training completed!")
                         
                         new_meta = storage.download_json(Settings.META_BLOB)
                         if new_meta:
                             st.markdown("**New Model Performance:**")
                             m1, m2, m3 = st.columns(3)
-                            m1.metric("R²", f"{new_meta['metrics'].get('r2', 0):.3f}")
-                            m2.metric("MAE", format_number(new_meta["metrics"].get("mae", 0)))
-
-                            m3.metric("RMSE", format_number(new_meta["metrics"].get("rmse", 0)))
+                            m1.metric("R²", f"{new_meta['metrics']['r2']:.3f}")
+                            m2.metric("MAE", format_number(new_meta['metrics']['mae']))
+                            m3.metric("RMSE", format_number(new_meta['metrics'].get('rmse', 0)))
                             
-                            st.info("Model saved to Azure Blob Storage and logged to MLflow")
+                            st.info("Model saved to Azure and logged to MLflow")
                     else:
                         st.error(f"Training failed: {message}")
                 
@@ -635,7 +858,84 @@ to measure prediction accuracy and detect when retraining is needed.
                 st.session_state.train_running = False
         
         # =========================================================================
-        # SECTION: PREDICTION
+        # SECTION: CLASSIFICATION TRAINING
+        # =========================================================================
+        
+        st.markdown('<div class="section-title">Train Classification Model</div>', unsafe_allow_html=True)
+        
+        st.markdown("""
+<div class="action-box">
+    <div class="action-title">Classification Model Training</div>
+    <div class="action-desc">
+    The classification model predicts the growth regime of a repository: Stable, Moderate Growth (Faible), 
+    or Explosive Growth (Explosion). This helps detect potential viral repositories early by categorizing 
+    their future trajectory. The classes are defined using relative gain thresholds to ensure fairness 
+    across repositories of different sizes.
+    </div>
+</div>
+""", unsafe_allow_html=True)
+        
+        # Current classifier status
+        clf_meta = storage.download_json(getattr(Settings, "CLASSIFIER_META_BLOB", "models/classifier_meta.json"))
+        
+        col_clf1, col_clf2, col_clf3 = st.columns(3)
+        
+        if clf_meta:
+            with col_clf1:
+                st.metric("F1 Macro", f"{clf_meta['metrics'].get('f1_macro', 0):.3f}")
+            with col_clf2:
+                st.metric("Recall Explosion", f"{clf_meta['metrics'].get('recall_explosion', 0):.3f}")
+            with col_clf3:
+                st.caption(f"Last trained: {clf_meta.get('created_at', 'N/A')[:16]}")
+        else:
+            with col_clf1:
+                st.info("No classifier trained yet")
+            with col_clf2:
+                st.write("")
+            with col_clf3:
+                st.write("")
+        
+        st.markdown("")
+        
+        # Bouton classifier training
+        col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+        with col_btn2:
+            if st.button("START CLASSIFICATION TRAINING", type="primary", use_container_width=True, disabled=st.session_state.clf_train_running, key="train_clf"):
+                st.session_state.clf_train_running = True
+                
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                def update_progress(pct, msg):
+                    progress_bar.progress(pct)
+                    status_text.text(msg)
+                
+                try:
+                    success, message = run_classifier_training(progress_callback=update_progress)
+                    
+                    if success:
+                        st.success("Classification training completed!")
+                        
+                        new_clf_meta = storage.download_json(getattr(Settings, "CLASSIFIER_META_BLOB", "models/classifier_meta.json"))
+                        if new_clf_meta:
+                            st.markdown("**New Classifier Performance:**")
+                            m1, m2, m3, m4 = st.columns(4)
+                            m1.metric("Accuracy", f"{new_clf_meta['metrics'].get('accuracy', 0):.3f}")
+                            m2.metric("F1 Macro", f"{new_clf_meta['metrics'].get('f1_macro', 0):.3f}")
+                            m3.metric("Recall Explosion", f"{new_clf_meta['metrics'].get('recall_explosion', 0):.3f}")
+                            m4.metric("Precision Explosion", f"{new_clf_meta['metrics'].get('precision_explosion', 0):.3f}")
+                            
+                            st.info("Classifier saved to Azure and logged to MLflow")
+                    else:
+                        st.error(f"Training failed: {message}")
+                
+                except Exception as e:
+                    st.error(f"Error: {e}")
+                
+                st.session_state.clf_train_running = False
+        
+        # =========================================================================
+        # SECTION: PREDICTION (Régression + Classification)
         # =========================================================================
         
         st.markdown('<div class="section-title">Generate Predictions</div>', unsafe_allow_html=True)
@@ -644,9 +944,8 @@ to measure prediction accuracy and detect when retraining is needed.
 <div class="action-box">
     <div class="action-title">Prediction Generation</div>
     <div class="action-desc">
-    Using the trained model, generate forecasts for all tracked repositories. The system predicts 
-    how many stars each repository will gain in the next 7 days. These predictions help identify 
-    trending projects early and understand growth patterns across the GitHub ecosystem.
+    Generate both regression predictions (exact star gain) and classification predictions (growth regime) 
+    for all tracked repositories. The system uses both models to provide a complete view of future repository performance.
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -654,14 +953,17 @@ to measure prediction accuracy and detect when retraining is needed.
         model_meta = storage.download_json(Settings.META_BLOB)
         
         if not model_meta:
-            st.warning("Please train a model first before generating predictions.")
+            st.warning("Please train the regression model first before generating predictions.")
         else:
-            col_pred1, col_pred2 = st.columns(2)
+            col_pred1, col_pred2, col_pred3 = st.columns(3)
             
             with col_pred1:
-                st.metric("Prediction Horizon", f"{model_meta.get('horizon_days', 7)} days")
+                st.metric("Regression Model", "Ready")
             with col_pred2:
-                st.metric("Model R²", f"{model_meta['metrics']['r2']:.3f}")
+                clf_status = "Ready" if clf_meta else "Not Trained"
+                st.metric("Classification Model", clf_status)
+            with col_pred3:
+                st.metric("Prediction Horizon", f"{model_meta.get('horizon_days', 7)} days")
             
             st.markdown("")
             
@@ -692,24 +994,65 @@ to measure prediction accuracy and detect when retraining is needed.
                                     st.session_state.pred_df = pred_df
                                     st.session_state.pred_date = pred_data.get("as_of_date")
                                     st.session_state.pred_generated = True
-                                    
-                                    st.markdown("**Top 5 Predicted Growth:**")
-                                    top5 = pred_df.nlargest(5, "pred_delta_stars_h")[
-                                        ["full_name", "pred_delta_stars_h"]
-                                    ]
-                                    for idx, row in top5.iterrows():
-                                        st.write(f"- **{row['full_name']}**: +{row['pred_delta_stars_h']:.0f} stars")
                         else:
                             st.error(f"Prediction failed: {message}")
                     
                     except Exception as e:
                         st.error(f"Error: {e}")
         
-        # Display full predictions if available
+        # =========================================================================
+        # SECTION: CLASSIFICATION RESULTS
+        # =========================================================================
+        
         if st.session_state.pred_generated and st.session_state.pred_df is not None:
+            pred_df = st.session_state.pred_df
+            
+            # Check if classification predictions exist
+            has_classification = "pred_class" in pred_df.columns and pred_df["pred_class"].notna().any()
+            
+            if has_classification:
+                st.markdown("---")
+                st.markdown('<div class="section-title">Classification Results</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="section-desc">Growth regime predictions for {st.session_state.pred_date}</div>', unsafe_allow_html=True)
+                
+                # Mapping des classes
+                class_names = {0: "Stable", 1: "Faible", 2: "Explosion"}
+                pred_df["class_name"] = pred_df["pred_class"].map(class_names)
+                
+                # Distribution des classes
+                st.markdown("### Class Distribution")
+                class_counts = pred_df["class_name"].value_counts()
+                
+                import plotly.graph_objects as go
+                
+                fig_dist = go.Figure(data=[
+                    go.Bar(
+                        x=class_counts.index,
+                        y=class_counts.values,
+                        marker=dict(
+                            color=['#4338ca', '#92400e', '#991b1b'],
+                        ),
+                        text=class_counts.values,
+                        textposition='auto',
+                    )
+                ])
+                
+                fig_dist.update_layout(
+                    title="Predicted Growth Regimes",
+                    xaxis_title="Class",
+                    yaxis_title="Number of Repositories",
+                    showlegend=False
+                )
+                
+                st.plotly_chart(fig_dist, use_container_width=True)
+            
+            # =========================================================================
+            # SECTION: REGRESSION RESULTS (TABLE)
+            # =========================================================================
+            
             st.markdown("---")
-            st.markdown('<div class="section-title">Latest Predictions</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="section-desc">Predictions generated on {st.session_state.pred_date}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-title">Prediction Details</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="section-desc">Detailed predictions generated on {st.session_state.pred_date}</div>', unsafe_allow_html=True)
             
             # EXPLICATION DU TABLEAU
             st.markdown("""
@@ -755,15 +1098,7 @@ to measure prediction accuracy and detect when retraining is needed.
 </div>
 """, unsafe_allow_html=True)
             
-            st.markdown("### Example:")
-            st.markdown("""
-**n8n-io/n8n** currently has **173,533 stars**. The model predicts it will gain **+1,566 stars** 
-in the next 7 days, reaching approximately **175,099 stars** total.
-""")
-            
             st.markdown("---")
-            
-            pred_df = st.session_state.pred_df
             
             col_a, col_b = st.columns(2)
             with col_a:
@@ -777,8 +1112,13 @@ in the next 7 days, reaching approximately **175,099 stars** total.
             
             show = show.sort_values("pred_delta_stars_h", ascending=False).head(top_n)
             
+            # Colonnes à afficher
+            display_cols = ["full_name", "stars_t", "pred_delta_stars_h", "pred_stars_t_plus_h"]
+            if has_classification and "class_name" in show.columns:
+                display_cols.append("class_name")
+            
             st.dataframe(
-                show[["full_name", "stars_t", "pred_delta_stars_h", "pred_stars_t_plus_h"]],
+                show[display_cols],
                 use_container_width=True,
                 hide_index=True,
             )
@@ -787,7 +1127,7 @@ in the next 7 days, reaching approximately **175,099 stars** total.
             st.download_button("Download Full Predictions (CSV)", csv, "predictions.csv", "text/csv")
     
     # =============================================================================
-    # PAGE: MLFLOW
+    # PAGES SECONDAIRES
     # =============================================================================
     
     elif st.session_state.current_page == "MLflow":
@@ -838,7 +1178,7 @@ in the next 7 days, reaching approximately **175,099 stars** total.
                     "start_time": ms_to_dt(info.start_time),
                 }
                 
-                for k in ["r2", "mae", "rmse"]:
+                for k in ["r2", "mae", "mse", "rmse", "f1_macro", "recall_explosion"]:
                     if k in data.metrics:
                         row[k] = data.metrics.get(k)
                 
@@ -854,10 +1194,6 @@ in the next 7 days, reaching approximately **175,099 stars** total.
             df_runs = pd.DataFrame(rows)
             st.dataframe(df_runs, use_container_width=True, hide_index=True)
     
-    # =============================================================================
-    # PAGE: TRAINING
-    # =============================================================================
-    
     elif st.session_state.current_page == "Training":
         if st.button("← Back to Home"):
             st.session_state.current_page = "Home"
@@ -866,11 +1202,7 @@ in the next 7 days, reaching approximately **175,099 stars** total.
         st.title("Advanced Training Configuration")
         st.caption("For advanced users: customize model hyperparameters")
         
-        st.info("This page is for advanced configuration. For quick training, use the button on the home page.")
-    
-    # =============================================================================
-    # PAGE: PREDICTIONS
-    # =============================================================================
+        st.info("This page is for advanced configuration. For quick training, use the buttons on the home page.")
     
     elif st.session_state.current_page == "Predictions":
         if st.button("← Back to Home"):
