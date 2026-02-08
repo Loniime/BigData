@@ -5,8 +5,8 @@ The project includes: daily data ingestion, feature engineering, model training,
 Deployment is running on **Azure Container Apps**, using **Azure Blob Storage** for persistence and **MLflow** for experiment tracking.
 
 ## Live Demo (Azure)
-- **Dashboard (Streamlit):** <PUT_DASHBOARD_URL_HERE>
-- **MLflow Tracking UI:** <PUT_MLFLOW_URL_HERE>
+- **Dashboard (Streamlit):** https://dashboard.orangeocean-5ade08aa.germanywestcentral.azurecontainerapps.io/
+- **MLflow Tracking UI:** https://mlflow.orangeocean-5ade08aa.germanywestcentral.azurecontainerapps.io/#/experiments/2/runs?searchFilter=&orderByKey=attributes.start_time&orderByAsc=false&startTime=ALL&lifecycleFilter=Active&modelVersionFilter=All+Runs&datasetsFilter=W10%3D
 
 > Secrets are not stored in this repository. Configuration is done via environment variables.
 
@@ -41,4 +41,5 @@ Deployment is running on **Azure Container Apps**, using **Azure Blob Storage** 
 ---
 
 ## Repository structure
+
 
